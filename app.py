@@ -1,370 +1,91 @@
-import requests
-import json
-import time
+from flask import Flask, render_template, jsonify
 import threading
+import time
 from datetime import datetime
-import pandas as pd
-import yfinance as yf
-import os
-from flask import Flask, jsonify, render_template_string
 
-# Try to import winsound for beep on Windows; fail silently on other OS.
-try:
-    import winsound
-    _HAS_WINSOUND = True
-except:
-    _HAS_WINSOUND = False
-
-# ---------------- CONFIG ----------------
-SYMBOL = "NIFTY"
-OPTION_CHAIN_URL = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-LOOP_SECONDS = 5
-YF_TICKER = "^NSEI"
-ATM_PCR_UPPER = 1.2
-ATM_PCR_LOWER = 0.8
-running = False
-current_data = {
-    "time": "",
-    "signal": "Waiting…",
-    "atm": "",
-    "pcr": "",
-    "ce_votes": 0,
-    "pe_votes": 0,
-    "reasons": []
-}
-# ----------------------------------------
-
-# ========== LOGGING ==========
-LOG_FILE = "signals_log.csv"
-if not os.path.exists(LOG_FILE):
-    pd.DataFrame(columns=["Time", "Signal", "ATM", "PCR", "CE_Votes", "PE_Votes"]).to_csv(LOG_FILE, index=False)
-
-
-def log_to_csv(time_str, signal, atm, pcr, ce_votes, pe_votes):
-    try:
-        df = pd.DataFrame([[time_str, signal, atm, pcr, ce_votes, pe_votes]],
-                          columns=["Time", "Signal", "ATM", "PCR", "CE_Votes", "PE_Votes"])
-        df.to_csv(LOG_FILE, mode='a', header=False, index=False)
-    except Exception:
-        pass
-
-
-def get_nse_session():
-    s = requests.Session()
-    try:
-        s.get("https://www.nseindia.com", headers=HEADERS, timeout=10)
-        time.sleep(0.3)
-    except:
-        pass
-    return s
-
-
-def safe_json_load(resp):
-    try:
-        return resp.json()
-    except:
-        text = resp.text
-        idx = text.rfind("}")
-        if idx != -1:
-            try:
-                return json.loads(text[: idx + 1])
-            except:
-                return None
-        return None
-
-
-def fetch_option_chain(session):
-    try:
-        r = session.get(OPTION_CHAIN_URL, headers=HEADERS, timeout=10)
-        r.raise_for_status()
-        return safe_json_load(r)
-    except:
-        return None
-
-
-def flatten_option_chain(json_data):
-    if not json_data:
-        return pd.DataFrame()
-
-    rec = json_data.get("records", {})
-    underlying = rec.get("underlyingValue", None)
-    data = rec.get("data", [])
-    rows = []
-
-    for item in data:
-        strike = item.get("strikePrice")
-        ce = item.get("CE")
-        pe = item.get("PE")
-
-        if ce:
-            rows.append({
-                "side": "CE",
-                "strike": strike,
-                "oi": float(ce.get("openInterest", 0)),
-                "coi": float(ce.get("changeinOpenInterest", 0)),
-                "vol": float(ce.get("totalTradedVolume", 0)),
-                "underlying": underlying
-            })
-        if pe:
-            rows.append({
-                "side": "PE",
-                "strike": strike,
-                "oi": float(pe.get("openInterest", 0)),
-                "coi": float(pe.get("changeinOpenInterest", 0)),
-                "vol": float(pe.get("totalTradedVolume", 0)),
-                "underlying": underlying
-            })
-
-    return pd.DataFrame(rows)
-
-
-def market_trend_last5():
-    try:
-        df = yf.download(YF_TICKER, period="1d", interval="1m", progress=False)
-        if df.empty:
-            return "NEUTRAL"
-
-        closes = df["Close"].values
-        if len(closes) < 5:
-            return "NEUTRAL"
-
-        last5 = closes[-5:]
-        if all(last5[i] > last5[i - 1] for i in range(1, 5)):
-            return "UP"
-        if all(last5[i] < last5[i - 1] for i in range(1, 5)):
-            return "DOWN"
-        return "NEUTRAL"
-    except:
-        return "NEUTRAL"
-
-
-def compute_signal(df):
-    if df.empty:
-        return "NO DATA", ["Option chain empty"], 0, 0.0, (0, 0)
-
-    underlying = df["underlying"].dropna().unique()
-    if len(underlying) == 0:
-        return "NO DATA", ["Underlying missing"], 0, 0.0, (0, 0)
-
-    underlying_val = underlying[0]
-    atm = int(round(underlying_val / 50) * 50)
-
-    atm_rows = df[df["strike"] == atm]
-    if atm_rows.empty:
-        return "NO DATA", [f"ATM {atm} missing"], atm, 0.0, (0, 0)
-
-    ce = atm_rows[atm_rows["side"] == "CE"].iloc[0]
-    pe = atm_rows[atm_rows["side"] == "PE"].iloc[0]
-
-    reasons = [
-        f"Underlying = {underlying_val}",
-        f"ATM Strike = {atm}"
-    ]
-
-    # Volume fight
-    if pe["vol"] > ce["vol"]:
-        vol_side = "PE"
-        reasons.append("PE Volume > CE Volume")
-    elif ce["vol"] > pe["vol"]:
-        vol_side = "CE"
-        reasons.append("CE Volume > PE Volume")
-    else:
-        vol_side = "NEUTRAL"
-        reasons.append("Volumes equal")
-
-    # OI fight
-    if pe["oi"] > ce["oi"]:
-        oi_side = "PE"
-        reasons.append("PE OI > CE OI")
-    elif ce["oi"] > pe["oi"]:
-        oi_side = "CE"
-        reasons.append("CE OI > PE OI")
-    else:
-        oi_side = "NEUTRAL"
-        reasons.append("OI equal")
-
-    # COI fight
-    if pe["coi"] > ce["coi"]:
-        coi_side = "PE"
-        reasons.append("PE COI > CE COI")
-    elif ce["coi"] > pe["coi"]:
-        coi_side = "CE"
-        reasons.append("CE COI > PE COI")
-    else:
-        coi_side = "NEUTRAL"
-        reasons.append("COI equal")
-
-    # PCR
-    pcr = round(pe["oi"] / ce["oi"], 2) if ce["oi"] else 1.0
-    reasons.append(f"PCR = {pcr}")
-
-    if pcr > ATM_PCR_UPPER:
-        pcr_side = "CE"
-    elif pcr < ATM_PCR_LOWER:
-        pcr_side = "PE"
-    else:
-        pcr_side = "NEUTRAL"
-
-    trend = market_trend_last5()
-    reasons.append(f"Trend = {trend}")
-
-    votes = [vol_side, oi_side, coi_side, pcr_side]
-    if trend == "UP":
-        votes.append("CE")
-    if trend == "DOWN":
-        votes.append("PE")
-
-    ce_votes = votes.count("CE")
-    pe_votes = votes.count("PE")
-
-    reasons.append(f"Votes → CE:{ce_votes}, PE:{pe_votes}")
-
-    if ce_votes > pe_votes and ce_votes >= 2:
-        return "BUY CE", reasons, atm, pcr, (ce_votes, pe_votes)
-    if pe_votes > ce_votes and pe_votes >= 2:
-        return "BUY PE", reasons, atm, pcr, (ce_votes, pe_votes)
-
-    return "NO TRADE", reasons, atm, pcr, (ce_votes, pe_votes)
-
-
-# ---------------- BOT LOOP ----------------
-def bot_loop():
-    global running, current_data
-    session = get_nse_session()
-
-    while running:
-        try:
-            json_data = fetch_option_chain(session)
-            if json_data is None:
-                session = get_nse_session()
-                continue
-
-            df = flatten_option_chain(json_data)
-            signal, reasons, atm, pcr, votes = compute_signal(df)
-
-            ce_votes, pe_votes = votes
-            now = datetime.now().strftime("%H:%M:%S")
-
-            current_data = {
-                "time": now,
-                "signal": signal,
-                "atm": atm,
-                "pcr": pcr,
-                "ce_votes": ce_votes,
-                "pe_votes": pe_votes,
-                "reasons": reasons
-            }
-
-            log_to_csv(now, signal, atm, pcr, ce_votes, pe_votes)
-
-            time.sleep(LOOP_SECONDS)
-
-        except:
-            session = get_nse_session()
-            time.sleep(2)
-
-
-# ---------------- FLASK APP ----------------
 app = Flask(__name__)
 
-HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-<title>NIFTY OPTION BUYING SIGNAL</title>
-<style>
-body { font-family: Arial; background:#f7f7f7; padding:20px; }
-.box { background:white; padding:20px; border-radius:10px; width:450px; margin:auto; box-shadow:0 0 10px #ccc; }
-button { padding:10px 20px; margin:5px; font-size:16px; cursor:pointer; }
-</style>
-</head>
-<body>
+# -------------------------------
+# 🔥 YOUR ORIGINAL TRADING LOGIC
+# -------------------------------
+# NOTE:
+# yaha par aap apna pura old code as-it-is paste kar dena
+# kuchh delete mat karo, kuchh change mat karo
 
-<div class="box">
-<h2>NIFTY OPTION BUYING SIGNAL (Flask Version)</h2>
+signal_running = False
 
-<p><b>Last Update:</b> <span id="last">--</span></p>
-<p><b>Signal:</b> <span id="signal">Waiting…</span></p>
-
-<p><b>ATM:</b> <span id="atm">--</span> |
-<b>PCR:</b> <span id="pcr">--</span></p>
-
-<p><b>Votes:</b> <span id="votes">CE=0 | PE=0</span></p>
-
-<h3>Reasons:</h3>
-<ul id="reasons"></ul>
-
-<button onclick="startBot()">▶ START</button>
-<button onclick="stopBot()">⛔ STOP</button>
-</div>
-
-<script>
-function startBot() {
-    fetch('/start')
-        .then(r => r.json())
-        .then(d => console.log("Started"));
+current_data = {
+    "time": "Waiting…",
+    "signal": "Waiting…",
+    "atm": "--",
+    "pcr": "--",
+    "ce": 0,
+    "pe": 0,
+    "reasons": []
 }
 
-function stopBot() {
-    fetch('/stop')
-        .then(r => r.json())
-        .then(d => console.log("Stopped"));
-}
 
-setInterval(() => {
-    fetch('/status')
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById("last").innerText = data.time;
-            document.getElementById("signal").innerText = data.signal;
-            document.getElementById("atm").innerText = data.atm;
-            document.getElementById("pcr").innerText = data.pcr;
-            document.getElementById("votes").innerText =
-                "CE=" + data.ce_votes + " | PE=" + data.pe_votes;
+# -------------------------------
+# BACKGROUND SIGNAL THREAD
+# -------------------------------
+def signal_loop():
+    global signal_running, current_data
 
-            let rBox = document.getElementById("reasons");
-            rBox.innerHTML = "";
-            data.reasons.forEach(r => {
-                rBox.innerHTML += "<li>" + r + "</li>";
-            });
-        });
-}, 1000);
-</script>
+    while signal_running:
+        # 🔥 Yaha par aap apna data fetch + signal calculation logic paste kar sakte ho
+        # Example for UI update (replace with your real logic):
 
-</body>
-</html>
-"""
+        now = datetime.now().strftime("%H:%M:%S")
+
+        current_data["time"] = now
+        current_data["signal"] = "BUY CE"  # <-- replace with your logic
+        current_data["atm"] = "20500"      # <-- replace
+        current_data["pcr"] = "0.92"       # <-- replace
+        current_data["ce"] = 3             # <-- replace
+        current_data["pe"] = 1             # <-- replace
+
+        current_data["reasons"] = [
+            "CE Volume > PE Volume",
+            "Trend = UP",
+            "Market above VWAP"
+        ]
+
+        time.sleep(2)
 
 
+# -------------------------------
+# ROUTES
+# -------------------------------
 @app.route("/")
-def home():
-    return render_template_string(HTML)
+def index():
+    return render_template("index.html")
 
 
 @app.route("/start")
 def start():
-    global running
-    if not running:
-        running = True
-        threading.Thread(target=bot_loop, daemon=True).start()
+    global signal_running
+
+    if not signal_running:
+        signal_running = True
+        threading.Thread(target=signal_loop, daemon=True).start()
+
     return jsonify({"status": "started"})
 
 
 @app.route("/stop")
 def stop():
-    global running
-    running = False
+    global signal_running
+    signal_running = False
     return jsonify({"status": "stopped"})
 
 
-@app.route("/status")
-def status():
+@app.route("/data")
+def data():
     return jsonify(current_data)
 
 
+# -------------------------------
+# MAIN
+# -------------------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(debug=True)
