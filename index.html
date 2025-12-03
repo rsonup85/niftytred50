@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIFTY OPTION BUYING SIGNAL</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <header>
+            <h1>NIFTY OPTION BUYING SIGNAL 🚀</h1>
+            <p class="subtitle">Flask Real-Time Version</p>
+        </header>
+
+        <div class="status-card">
+            <h2>Last Update:</h2>
+            <p id="last-update">Waiting…</p>
+        </div>
+
+        <div class="signal-box">
+            <div class="signal-label">Signal</div>
+            <div id="signal-value">Waiting…</div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <h3>ATM</h3>
+                <p id="atm">--</p>
+            </div>
+
+            <div class="info-card">
+                <h3>PCR</h3>
+                <p id="pcr">--</p>
+            </div>
+
+            <div class="info-card">
+                <h3>Votes</h3>
+                <p id="votes">CE=0 | PE=0</p>
+            </div>
+        </div>
+
+        <div class="reasons-box">
+            <h2>Reasons</h2>
+            <ul id="reasons"></ul>
+        </div>
+
+        <div class="buttons">
+            <button id="start-btn" onclick="startSignal()">▶ START</button>
+            <button id="stop-btn" onclick="stopSignal()">⛔ STOP</button>
+        </div>
+
+    </div>
+
+<script>
+function startSignal() {
+    fetch('/start')
+        .then(res => res.json())
+        .then(data => {
+            alert("Signal Started!");
+        });
+}
+
+function stopSignal() {
+    fetch('/stop')
+        .then(res => res.json())
+        .then(data => {
+            alert("Signal Stopped!");
+        });
+}
+
+// Auto refresh every 3 seconds
+setInterval(() => {
+    fetch('/data')
+        .then(res => res.json())
+        .then(data => {
+
+            document.getElementById("last-update").innerText = data.time;
+            document.getElementById("signal-value").innerText = data.signal;
+            document.getElementById("atm").innerText = data.atm;
+            document.getElementById("pcr").innerText = data.pcr;
+            document.getElementById("votes").innerText = `CE=${data.ce} | PE=${data.pe}`;
+
+            let reasons_list = document.getElementById("reasons");
+            reasons_list.innerHTML = "";
+            data.reasons.forEach(r => {
+                let li = document.createElement("li");
+                li.innerText = r;
+                reasons_list.appendChild(li);
+            });
+
+            // Dynamic Signal Color
+            let signalBox = document.querySelector(".signal-box");
+            if (data.signal === "BUY CE") signalBox.style.background = "#b8ffb8";
+            else if (data.signal === "BUY PE") signalBox.style.background = "#ffb8b8";
+            else signalBox.style.background = "#e6e6e6";
+
+        });
+}, 3000);
+</script>
+
+</body>
+</html>
