@@ -6,7 +6,7 @@ from datetime import datetime
 import pandas as pd
 import yfinance as yf
 import os
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template
 
 # Try to import winsound for beep on Windows; fail silently on other OS.
 try:
@@ -165,7 +165,6 @@ def compute_signal(df):
         f"ATM Strike = {atm}"
     ]
 
-    # Volume fight
     if pe["vol"] > ce["vol"]:
         vol_side = "PE"
         reasons.append("PE Volume > CE Volume")
@@ -176,7 +175,6 @@ def compute_signal(df):
         vol_side = "NEUTRAL"
         reasons.append("Volumes equal")
 
-    # OI fight
     if pe["oi"] > ce["oi"]:
         oi_side = "PE"
         reasons.append("PE OI > CE OI")
@@ -187,7 +185,6 @@ def compute_signal(df):
         oi_side = "NEUTRAL"
         reasons.append("OI equal")
 
-    # COI fight
     if pe["coi"] > ce["coi"]:
         coi_side = "PE"
         reasons.append("PE COI > CE COI")
@@ -198,7 +195,6 @@ def compute_signal(df):
         coi_side = "NEUTRAL"
         reasons.append("COI equal")
 
-    # PCR
     pcr = round(pe["oi"] / ce["oi"], 2) if ce["oi"] else 1.0
     reasons.append(f"PCR = {pcr}")
 
@@ -231,7 +227,6 @@ def compute_signal(df):
     return "NO TRADE", reasons, atm, pcr, (ce_votes, pe_votes)
 
 
-# ---------------- BOT LOOP ----------------
 def bot_loop():
     global running, current_data
     session = get_nse_session()
@@ -268,81 +263,12 @@ def bot_loop():
             time.sleep(2)
 
 
-# ---------------- FLASK APP ----------------
 app = Flask(__name__)
-
-HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-<title>NIFTY OPTION BUYING SIGNAL</title>
-<style>
-body { font-family: Arial; background:#f7f7f7; padding:20px; }
-.box { background:white; padding:20px; border-radius:10px; width:450px; margin:auto; box-shadow:0 0 10px #ccc; }
-button { padding:10px 20px; margin:5px; font-size:16px; cursor:pointer; }
-</style>
-</head>
-<body>
-
-<div class="box">
-<h2>NIFTY OPTION BUYING SIGNAL (Flask Version)</h2>
-
-<p><b>Last Update:</b> <span id="last">--</span></p>
-<p><b>Signal:</b> <span id="signal">Waiting…</span></p>
-
-<p><b>ATM:</b> <span id="atm">--</span> |
-<b>PCR:</b> <span id="pcr">--</span></p>
-
-<p><b>Votes:</b> <span id="votes">CE=0 | PE=0</span></p>
-
-<h3>Reasons:</h3>
-<ul id="reasons"></ul>
-
-<button onclick="startBot()">▶ START</button>
-<button onclick="stopBot()">⛔ STOP</button>
-</div>
-
-<script>
-function startBot() {
-    fetch('/start')
-        .then(r => r.json())
-        .then(d => console.log("Started"));
-}
-
-function stopBot() {
-    fetch('/stop')
-        .then(r => r.json())
-        .then(d => console.log("Stopped"));
-}
-
-setInterval(() => {
-    fetch('/status')
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById("last").innerText = data.time;
-            document.getElementById("signal").innerText = data.signal;
-            document.getElementById("atm").innerText = data.atm;
-            document.getElementById("pcr").innerText = data.pcr;
-            document.getElementById("votes").innerText =
-                "CE=" + data.ce_votes + " | PE=" + data.pe_votes;
-
-            let rBox = document.getElementById("reasons");
-            rBox.innerHTML = "";
-            data.reasons.forEach(r => {
-                rBox.innerHTML += "<li>" + r + "</li>";
-            });
-        });
-}, 1000);
-</script>
-
-</body>
-</html>
-"""
 
 
 @app.route("/")
 def home():
-    return render_template_string(HTML)
+    return render_template("index.html")
 
 
 @app.route("/start")
