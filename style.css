@@ -1,0 +1,98 @@
+body {
+    margin: 0;
+    padding: 0;
+    font-family: "Segoe UI", sans-serif;
+    background: #0d0d0d;
+    color: white;
+}
+
+.container {
+    width: 90%;
+    max-width: 800px;
+    margin: auto;
+    padding: 20px;
+}
+
+header h1 {
+    text-align: center;
+    font-size: 32px;
+    margin-bottom: 5px;
+    color: #00eaff;
+}
+
+.subtitle {
+    text-align: center;
+    color: #cccccc;
+    margin-bottom: 20px;
+}
+
+.status-card {
+    background: #1a1a1a;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+}
+
+.signal-box {
+    text-align: center;
+    padding: 20px;
+    background: #1a1a1a;
+    border-radius: 15px;
+    font-size: 24px;
+    margin-bottom: 20px;
+    transition: 0.3s;
+}
+
+.signal-label {
+    font-size: 18px;
+    color: #888;
+}
+
+.info-grid {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.info-card {
+    width: 30%;
+    background: #1a1a1a;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.reasons-box {
+    background: #1a1a1a;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+}
+
+.buttons {
+    text-align: center;
+}
+
+button {
+    background: #00aaff;
+    border: none;
+    padding: 12px 25px;
+    color: black;
+    font-size: 18px;
+    border-radius: 10px;
+    margin: 10px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+button:hover {
+    background: #0088dd;
+}
+
+#stop-btn {
+    background: #ff4444;
+}
+
+#stop-btn:hover {
+    background: #dd2222;
+}
