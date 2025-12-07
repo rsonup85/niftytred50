@@ -1,6 +1,7 @@
 services:
   - type: web
-    name: flask-demo
+    name: my-flask-app
     env: python
+    pythonVersion: "3.10"
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app"
+    startCommand: "python app.py"
